@@ -501,6 +501,26 @@
     };
   }
 
+  async function fetchJson(directUrl) {
+    // Try OpenSky directly first — if their CORS headers ever line up, this
+    // is the fastest, most reliable path with no third party involved.
+    try {
+      const res = await fetch(directUrl);
+      if (res.ok) return res;
+      if (res.status === 429) throw { status: 429 };
+      throw { status: res.status };
+    } catch (directErr) {
+      if (directErr && directErr.status === 429) throw directErr;
+      // Direct request was blocked (almost always a CORS restriction in the
+      // browser, surfaced as a generic "Failed to fetch"). Fall back to a
+      // public CORS-forwarding proxy.
+      const proxied = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(directUrl);
+      const res = await fetch(proxied);
+      if (!res.ok) throw { status: res.status };
+      return res;
+    }
+  }
+
   async function fetchFlights() {
     if (!center) return;
     setStatus('updating…', 'live');
@@ -508,11 +528,7 @@
     const url = 'https://opensky-network.org/api/states/all?lamin=' + box.lamin +
                 '&lomin=' + box.lomin + '&lamax=' + box.lamax + '&lomax=' + box.lomax;
     try {
-      const res = await fetch(url);
-      if (!res.ok) {
-        if (res.status === 429) throw new Error('OpenSky\'s free daily request limit was hit — it resets tomorrow.');
-        throw new Error('OpenSky returned an error (' + res.status + ').');
-      }
+      const res = await fetchJson(url);
       const data = await res.json();
       const states = (data.states || []).map(classifySample).filter(function (f) {
         return !f.onGround && f.lat != null && f.lon != null;
@@ -526,8 +542,11 @@
       renderFlights();
       setStatus('live · updated ' + new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}), 'live');
     } catch (err) {
-      setStatus(err.message || 'connection lost', 'stale');
-      flightList.innerHTML = '<li class="error-state">' + (err.message || 'Could not reach OpenSky.') + ' Retrying automatically.</li>';
+      const msg = (err && err.status === 429)
+        ? 'OpenSky\'s free daily request limit was hit — it resets tomorrow.'
+        : 'Could not reach flight data.';
+      setStatus(msg, 'stale');
+      flightList.innerHTML = '<li class="error-state">' + msg + ' Retrying automatically.</li>';
     }
   }
 
