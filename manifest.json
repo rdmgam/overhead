@@ -1,0 +1,14 @@
+{
+  "name": "Overhead",
+  "short_name": "Overhead",
+  "description": "Live air traffic near your location, from OpenSky Network.",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#061410",
+  "theme_color": "#061410",
+  "orientation": "portrait",
+  "icons": [
+    { "src": "apple-touch-icon.png", "sizes": "180x180", "type": "image/png" },
+    { "src": "icon-1024.png", "sizes": "1024x1024", "type": "image/png" }
+  ]
+}

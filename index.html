@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Overhead</title>
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Overhead">
+<meta name="theme-color" content="#061410">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --scope-bg: #061410;
+    --scope-ring: #153a2c;
+    --scope-ring-dim: #0e2a20;
+    --amber: #ffb347;
+    --amber-dim: #a67232;
+    --mint: #6fd9a8;
+    --ink: #dff2ea;
+    --ink-dim: #7fa596;
+    --panel-bg: #08120f;
+    --panel-line: #16302a;
+    --danger: #ff6b5e;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: #020806;
+    color: var(--ink);
+    font-family: 'Space Grotesk', sans-serif;
+    min-height: 100vh;
+  }
+
+  .app {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    padding: max(20px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));
+    gap: 18px;
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+
+  header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+    border-bottom: 1px solid var(--panel-line);
+    padding-bottom: 14px;
+  }
+
+  header h1 {
+    font-size: 1.6rem;
+    font-weight: 600;
+    margin: 0;
+    letter-spacing: 0.01em;
+  }
+
+  .status-line {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.85rem;
+    color: var(--ink-dim);
+  }
+
+  .status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--mint);
+    box-shadow: 0 0 6px var(--mint);
+  }
+  .status-dot.stale { background: var(--danger); box-shadow: 0 0 6px var(--danger); animation: none; }
+  .status-dot.live { animation: pulse 2s ease-in-out infinite; }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.35; }
+  }
+
+  .location-line {
+    font-size: 0.9rem;
+    color: var(--ink-dim);
+  }
+
+  .location-line button {
+    background: none;
+    border: none;
+    color: var(--amber);
+    font-family: inherit;
+    font-size: inherit;
+    cursor: pointer;
+    padding: 0;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+
+  main {
+    display: grid;
+    grid-template-columns: minmax(280px, 440px) 1fr;
+    gap: 22px;
+    flex: 1;
+  }
+
+  @media (max-width: 760px) {
+    main { grid-template-columns: 1fr; }
+  }
+
+  /* ---------- Scope ---------- */
+
+  .scope-frame {
+    position: relative;
+    aspect-ratio: 1;
+    width: 100%;
+    border-radius: 50%;
+    background: var(--scope-bg);
+    border: 1px solid var(--panel-line);
+    overflow: hidden;
+    box-shadow: inset 0 0 60px rgba(0,0,0,0.6);
+  }
+
+  .sweep {
+    position: absolute;
+    inset: 0;
+    background: conic-gradient(
+      from 0deg,
+      rgba(111, 217, 168, 0.22) 0deg,
+      rgba(111, 217, 168, 0.05) 25deg,
+      transparent 70deg
+    );
+    animation: rotate 8s linear infinite;
+    transform-origin: center;
+  }
+
+  @keyframes rotate {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+
+  .scope-frame svg {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+  }
+
+  .ring { fill: none; stroke: var(--scope-ring); stroke-width: 1; }
+  .ring-dim { fill: none; stroke: var(--scope-ring-dim); stroke-width: 1; stroke-dasharray: 2 4; }
+  .crosshair { stroke: var(--scope-ring); stroke-width: 1; }
+  .compass-label {
+    fill: var(--ink-dim);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+  }
+  .range-label {
+    fill: var(--ink-dim);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 8px;
+  }
+
+  .blip {
+    cursor: pointer;
+  }
+  .blip .tri {
+    fill: var(--amber);
+    stroke: none;
+  }
+  .blip.selected .tri {
+    fill: var(--ink);
+  }
+  .blip-halo {
+    fill: none;
+    stroke: var(--amber);
+    stroke-width: 1;
+    opacity: 0.35;
+  }
+  .blip-label {
+    fill: var(--amber-dim);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+  }
+  .blip.selected .blip-label { fill: var(--ink); }
+
+  .center-dot {
+    fill: var(--mint);
+  }
+
+  /* ---------- Data panel ---------- */
+
+  .panel {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .panel-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 10px;
+  }
+
+  .panel-head h2 {
+    font-size: 0.95rem;
+    font-weight: 500;
+    margin: 0;
+    color: var(--ink-dim);
+  }
+
+  .panel-head .count {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.85rem;
+    color: var(--ink-dim);
+  }
+
+  .flight-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    overflow-y: auto;
+    border-top: 1px solid var(--panel-line);
+  }
+
+  .flight-row {
+    display: grid;
+    grid-template-columns: 1fr auto auto auto auto;
+    gap: 14px;
+    align-items: center;
+    padding: 10px 6px;
+    border-bottom: 1px solid var(--panel-line);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.82rem;
+    cursor: pointer;
+    transition: background 0.15s ease;
+  }
+
+  .flight-row:hover, .flight-row.selected {
+    background: rgba(255, 179, 71, 0.08);
+  }
+
+  .flight-row .callsign {
+    color: var(--ink);
+    font-weight: 500;
+    letter-spacing: 0.02em;
+  }
+
+  .flight-row .country {
+    color: var(--ink-dim);
+    font-size: 0.7rem;
+    font-family: 'Space Grotesk', sans-serif;
+    grid-column: 1;
+    grid-row: 2;
+    margin-top: -6px;
+  }
+
+  .flight-row .metric { color: var(--ink-dim); text-align: right; white-space: nowrap; }
+  .flight-row .metric .val { color: var(--ink); }
+
+  .vrate-up { color: var(--mint); }
+  .vrate-down { color: var(--danger); }
+
+  .empty-state, .error-state {
+    padding: 30px 10px;
+    text-align: center;
+    color: var(--ink-dim);
+    font-size: 0.9rem;
+    line-height: 1.5;
+  }
+
+  .error-state { color: var(--danger); }
+
+  .detail-card {
+    margin-top: 14px;
+    padding: 14px;
+    border: 1px solid var(--panel-line);
+    border-radius: 4px;
+    background: rgba(255,255,255,0.02);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.85rem;
+    display: none;
+  }
+  .detail-card.visible { display: block; }
+  .detail-card .row { display: flex; justify-content: space-between; padding: 3px 0; }
+  .detail-card .row span:first-child { color: var(--ink-dim); }
+
+  footer {
+    font-size: 0.75rem;
+    color: var(--ink-dim);
+    text-align: center;
+    padding-top: 8px;
+  }
+
+  footer a { color: var(--ink-dim); }
+
+  .loc-form {
+    display: none;
+    gap: 8px;
+    align-items: center;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.8rem;
+  }
+  .loc-form.visible { display: flex; flex-wrap: wrap; }
+  .loc-form input {
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-line);
+    color: var(--ink);
+    font-family: inherit;
+    font-size: inherit;
+    padding: 4px 8px;
+    width: 100px;
+    border-radius: 3px;
+  }
+  .loc-form button {
+    background: var(--amber-dim);
+    border: none;
+    color: #10160f;
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 500;
+    font-size: 0.8rem;
+    padding: 5px 12px;
+    border-radius: 3px;
+    cursor: pointer;
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <header>
+    <div>
+      <h1>Overhead</h1>
+      <div class="location-line" id="locationLine">
+        Locating you… <button id="editLocationBtn" style="display:none;">change</button>
+      </div>
+    </div>
+    <div class="status-line">
+      <span class="status-dot live" id="statusDot"></span>
+      <span id="statusText">connecting</span>
+    </div>
+  </header>
+
+  <div class="loc-form" id="locForm">
+    <input type="text" id="latInput" placeholder="latitude">
+    <input type="text" id="lonInput" placeholder="longitude">
+    <button id="applyLocBtn">Use this location</button>
+  </div>
+
+  <main>
+    <div class="scope-frame" id="scopeFrame">
+      <div class="sweep"></div>
+      <svg id="scopeSvg" viewBox="0 0 400 400"></svg>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">
+        <h2>Tracked aircraft, nearest first</h2>
+        <span class="count" id="flightCount">—</span>
+      </div>
+      <ul class="flight-list" id="flightList">
+        <li class="empty-state">Waiting for a location fix…</li>
+      </ul>
+      <div class="detail-card" id="detailCard"></div>
+    </div>
+  </main>
+
+  <footer>
+    Live positions from <a href="https://opensky-network.org" target="_blank" rel="noopener">OpenSky Network</a>,
+    a volunteer ADS-B receiver community. Some aircraft (military, some GA) may not broadcast and won't appear.
+  </footer>
+
+</div>
+
+<script>
+(function () {
+  const RANGE_NM = 40; // scope radius in nautical miles
+  const REFRESH_MS = 45000; // stay well under OpenSky's anonymous daily credit quota
+  const STALE_MS = 90000;
+
+  let center = null; // {lat, lon, label}
+  let flights = [];
+  let selectedIcao = null;
+  let refreshTimer = null;
+
+  const svg = document.getElementById('scopeSvg');
+  const flightList = document.getElementById('flightList');
+  const flightCount = document.getElementById('flightCount');
+  const statusDot = document.getElementById('statusDot');
+  const statusText = document.getElementById('statusText');
+  const locationLine = document.getElementById('locationLine');
+  const editBtn = document.getElementById('editLocationBtn');
+  const locForm = document.getElementById('locForm');
+  const detailCard = document.getElementById('detailCard');
+
+  function toRad(d) { return d * Math.PI / 180; }
+  function toDeg(r) { return r * 180 / Math.PI; }
+
+  function haversineNm(lat1, lon1, lat2, lon2) {
+    const R = 3440.065; // nm
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon/2)**2;
+    return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  }
+
+  function bearingDeg(lat1, lon1, lat2, lon2) {
+    const y = Math.sin(toRad(lon2 - lon1)) * Math.cos(toRad(lat2));
+    const x = Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) -
+              Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(toRad(lon2 - lon1));
+    return (toDeg(Math.atan2(y, x)) + 360) % 360;
+  }
+
+  // Rough bounding box (deg) for a given radius in nm around a point.
+  function bboxFor(lat, lon, nm) {
+    const latDelta = nm / 60; // ~60 nm per degree latitude
+    const lonDelta = nm / (60 * Math.cos(toRad(lat)) || 1);
+    return {
+      lamin: lat - latDelta, lamax: lat + latDelta,
+      lomin: lon - lonDelta, lomax: lon + lonDelta
+    };
+  }
+
+  function setStatus(text, state) {
+    statusText.textContent = text;
+    statusDot.className = 'status-dot ' + (state || 'live');
+  }
+
+  function setLocationLabel(label) {
+    locationLine.innerHTML = label + ' <button id="editLocationBtn">change</button>';
+    document.getElementById('editLocationBtn').addEventListener('click', showLocForm);
+  }
+
+  function showLocForm() {
+    locForm.classList.add('visible');
+    if (center) {
+      document.getElementById('latInput').value = center.lat.toFixed(4);
+      document.getElementById('lonInput').value = center.lon.toFixed(4);
+    }
+  }
+
+  document.getElementById('applyLocBtn').addEventListener('click', function () {
+    const lat = parseFloat(document.getElementById('latInput').value);
+    const lon = parseFloat(document.getElementById('lonInput').value);
+    if (isNaN(lat) || isNaN(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+      alert('Enter a valid latitude (-90 to 90) and longitude (-180 to 180).');
+      return;
+    }
+    locForm.classList.remove('visible');
+    setCenter(lat, lon, lat.toFixed(3) + ', ' + lon.toFixed(3));
+  });
+
+  function setCenter(lat, lon, label) {
+    center = { lat, lon, label };
+    setLocationLabel('Within ' + RANGE_NM + ' nautical miles of ' + label);
+    drawScopeBase();
+    fetchFlights();
+    if (refreshTimer) clearInterval(refreshTimer);
+    refreshTimer = setInterval(fetchFlights, REFRESH_MS);
+  }
+
+  function drawScopeBase() {
+    const rings = [0.33, 0.66, 1.0]; // fraction of RANGE_NM at r=180
+    const cx = 200, cy = 200, maxR = 180;
+    let parts = '';
+    rings.forEach(function (f) {
+      parts += '<circle class="ring' + (f === 1 ? '' : ' ring-dim') + '" cx="' + cx + '" cy="' + cy + '" r="' + (maxR * f) + '"/>';
+      parts += '<text class="range-label" x="' + (cx + 4) + '" y="' + (cy - maxR * f + 10) + '">' + Math.round(RANGE_NM * f) + ' nm</text>';
+    });
+    parts += '<line class="crosshair" x1="' + cx + '" y1="20" x2="' + cx + '" y2="380"/>';
+    parts += '<line class="crosshair" x1="20" y1="' + cy + '" x2="380" y2="' + cy + '"/>';
+    parts += '<text class="compass-label" x="' + cx + '" y="14" text-anchor="middle">N</text>';
+    parts += '<text class="compass-label" x="' + cx + '" y="394" text-anchor="middle">S</text>';
+    parts += '<text class="compass-label" x="8" y="' + (cy + 4) + '">W</text>';
+    parts += '<text class="compass-label" x="392" y="' + (cy + 4) + '" text-anchor="end">E</text>';
+    parts += '<circle class="center-dot" cx="' + cx + '" cy="' + cy + '" r="3"/>';
+    svg.innerHTML = parts;
+  }
+
+  function classifySample(s) {
+    return {
+      icao24: s[0],
+      callsign: (s[1] || '').trim() || null,
+      country: s[2],
+      lon: s[5],
+      lat: s[6],
+      baroAltM: s[7],
+      onGround: s[8],
+      velocityMs: s[9],
+      trueTrack: s[10],
+      vrateMs: s[11],
+    };
+  }
+
+  async function fetchFlights() {
+    if (!center) return;
+    setStatus('updating…', 'live');
+    const box = bboxFor(center.lat, center.lon, RANGE_NM);
+    const url = 'https://opensky-network.org/api/states/all?lamin=' + box.lamin +
+                '&lomin=' + box.lomin + '&lamax=' + box.lamax + '&lomax=' + box.lomax;
+    try {
+      const res = await fetch(url);
+      if (!res.ok) {
+        if (res.status === 429) throw new Error('OpenSky\'s free daily request limit was hit — it resets tomorrow.');
+        throw new Error('OpenSky returned an error (' + res.status + ').');
+      }
+      const data = await res.json();
+      const states = (data.states || []).map(classifySample).filter(function (f) {
+        return !f.onGround && f.lat != null && f.lon != null;
+      });
+      states.forEach(function (f) {
+        f.distanceNm = haversineNm(center.lat, center.lon, f.lat, f.lon);
+        f.bearing = bearingDeg(center.lat, center.lon, f.lat, f.lon);
+      });
+      states.sort(function (a, b) { return a.distanceNm - b.distanceNm; });
+      flights = states.filter(function (f) { return f.distanceNm <= RANGE_NM; });
+      renderFlights();
+      setStatus('live · updated ' + new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}), 'live');
+    } catch (err) {
+      setStatus(err.message || 'connection lost', 'stale');
+      flightList.innerHTML = '<li class="error-state">' + (err.message || 'Could not reach OpenSky.') + ' Retrying automatically.</li>';
+    }
+  }
+
+  function fmtAlt(m) {
+    if (m == null) return '—';
+    return Math.round(m * 3.28084).toLocaleString() + ' ft';
+  }
+  function fmtSpeed(ms) {
+    if (ms == null) return '—';
+    return Math.round(ms * 1.94384) + ' kt';
+  }
+  function vrateArrow(ms) {
+    if (ms == null || Math.abs(ms) < 0.5) return { symbol: '→', cls: '' };
+    return ms > 0 ? { symbol: '↑', cls: 'vrate-up' } : { symbol: '↓', cls: 'vrate-down' };
+  }
+
+  function renderFlights() {
+    flightCount.textContent = flights.length + (flights.length === 1 ? ' aircraft' : ' aircraft');
+    if (flights.length === 0) {
+      flightList.innerHTML = '<li class="empty-state">Nothing broadcasting overhead right now. Quiet skies, or just outside receiver coverage — check back in a bit.</li>';
+      drawBlips();
+      return;
+    }
+    flightList.innerHTML = flights.map(function (f) {
+      const v = vrateArrow(f.vrateMs);
+      const label = f.callsign || f.icao24.toUpperCase();
+      return '<li class="flight-row' + (f.icao24 === selectedIcao ? ' selected' : '') + '" data-icao="' + f.icao24 + '">' +
+        '<span class="callsign">' + label + '</span>' +
+        '<span class="metric"><span class="val">' + fmtAlt(f.baroAltM) + '</span></span>' +
+        '<span class="metric"><span class="val">' + fmtSpeed(f.velocityMs) + '</span></span>' +
+        '<span class="metric ' + v.cls + '">' + v.symbol + '</span>' +
+        '<span class="metric"><span class="val">' + f.distanceNm.toFixed(1) + ' nm</span></span>' +
+        '<span class="country">' + (f.country || '') + '</span>' +
+        '</li>';
+    }).join('');
+
+    Array.prototype.forEach.call(flightList.querySelectorAll('.flight-row'), function (row) {
+      row.addEventListener('click', function () {
+        selectedIcao = (selectedIcao === row.dataset.icao) ? null : row.dataset.icao;
+        renderFlights();
+        showDetail();
+      });
+    });
+
+    drawBlips();
+  }
+
+  function drawBlips() {
+    drawScopeBase();
+    const cx = 200, cy = 200, maxR = 180;
+    let parts = '';
+    flights.forEach(function (f) {
+      const r = Math.min(f.distanceNm / RANGE_NM, 1) * maxR;
+      const angleRad = toRad(f.bearing - 90); // bearing 0 = up
+      const x = cx + r * Math.cos(angleRad);
+      const y = cy + r * Math.sin(angleRad);
+      const isSelected = f.icao24 === selectedIcao;
+      const track = f.trueTrack || 0;
+      parts += '<g class="blip' + (isSelected ? ' selected' : '') + '" data-icao="' + f.icao24 + '" transform="translate(' + x + ',' + y + ')">' +
+        (isSelected ? '<circle class="blip-halo" r="10"/>' : '') +
+        '<path class="tri" d="M0,-6 L4,5 L0,2 L-4,5 Z" transform="rotate(' + track + ')"/>' +
+        '<text class="blip-label" x="7" y="4">' + (f.callsign || f.icao24.toUpperCase()) + '</text>' +
+        '</g>';
+    });
+    svg.insertAdjacentHTML('beforeend', parts);
+    Array.prototype.forEach.call(svg.querySelectorAll('.blip'), function (g) {
+      g.addEventListener('click', function () {
+        selectedIcao = (selectedIcao === g.dataset.icao) ? null : g.dataset.icao;
+        renderFlights();
+        showDetail();
+      });
+    });
+  }
+
+  function showDetail() {
+    if (!selectedIcao) { detailCard.classList.remove('visible'); return; }
+    const f = flights.find(function (x) { return x.icao24 === selectedIcao; });
+    if (!f) { detailCard.classList.remove('visible'); return; }
+    const v = vrateArrow(f.vrateMs);
+    detailCard.innerHTML =
+      '<div class="row"><span>Callsign</span><span>' + (f.callsign || '—') + '</span></div>' +
+      '<div class="row"><span>ICAO24</span><span>' + f.icao24.toUpperCase() + '</span></div>' +
+      '<div class="row"><span>Origin country</span><span>' + (f.country || '—') + '</span></div>' +
+      '<div class="row"><span>Altitude</span><span>' + fmtAlt(f.baroAltM) + '</span></div>' +
+      '<div class="row"><span>Ground speed</span><span>' + fmtSpeed(f.velocityMs) + '</span></div>' +
+      '<div class="row"><span>Heading</span><span>' + (f.trueTrack != null ? Math.round(f.trueTrack) + '°' : '—') + '</span></div>' +
+      '<div class="row"><span>Vertical rate</span><span class="' + v.cls + '">' + v.symbol + ' ' + (f.vrateMs != null ? Math.round(f.vrateMs * 196.85) + ' ft/min' : '—') + '</span></div>' +
+      '<div class="row"><span>Distance</span><span>' + f.distanceNm.toFixed(1) + ' nm</span></div>';
+    detailCard.classList.add('visible');
+  }
+
+  // ---------- Boot ----------
+
+  drawScopeBase();
+
+  if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(
+      function (pos) {
+        setCenter(pos.coords.latitude, pos.coords.longitude, 'your location');
+      },
+      function () {
+        // Permission denied or unavailable — fall back to a manual prompt.
+        setLocationLabel('Location unavailable');
+        showLocForm();
+        setStatus('enter a location to begin', 'stale');
+      },
+      { timeout: 8000 }
+    );
+  } else {
+    setLocationLabel('Location unavailable');
+    showLocForm();
+    setStatus('enter a location to begin', 'stale');
+  }
+
+})();
+</script>
+</body>
+</html>
