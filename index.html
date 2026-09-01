@@ -659,23 +659,40 @@
 
   drawScopeBase();
 
+  function fallbackToManualLocation() {
+    setLocationLabel('Location unavailable');
+    showLocForm();
+    setStatus('enter a location to begin', 'stale');
+    flightList.innerHTML = '<li class="empty-state">Enter a latitude and longitude above, then tap "Use this location."</li>';
+  }
+
   if (navigator.geolocation) {
+    let settled = false;
+    // iOS standalone (home-screen) web apps sometimes never resolve the
+    // geolocation permission prompt at all — the browser's own `timeout`
+    // option can't be trusted to fire in that case, so we back it with our
+    // own timer to guarantee the manual location form always appears.
+    const safetyTimer = setTimeout(function () {
+      if (!settled) { settled = true; fallbackToManualLocation(); }
+    }, 8000);
+
     navigator.geolocation.getCurrentPosition(
       function (pos) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(safetyTimer);
         setCenter(pos.coords.latitude, pos.coords.longitude, 'your location');
       },
       function () {
-        // Permission denied or unavailable — fall back to a manual prompt.
-        setLocationLabel('Location unavailable');
-        showLocForm();
-        setStatus('enter a location to begin', 'stale');
+        if (settled) return;
+        settled = true;
+        clearTimeout(safetyTimer);
+        fallbackToManualLocation();
       },
       { timeout: 8000 }
     );
   } else {
-    setLocationLabel('Location unavailable');
-    showLocForm();
-    setStatus('enter a location to begin', 'stale');
+    fallbackToManualLocation();
   }
 
 })();
