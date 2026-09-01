@@ -486,7 +486,7 @@
     svg.innerHTML = parts;
   }
 
-  function classifySample(s) {
+  function classifyOpenSkySample(s) {
     return {
       icao24: s[0],
       callsign: (s[1] || '').trim() || null,
@@ -501,50 +501,72 @@
     };
   }
 
-  async function fetchJson(directUrl) {
-    const attempts = [
-      { label: 'direct', url: directUrl },
-      { label: 'corsproxy.io', url: 'https://corsproxy.io/?url=' + encodeURIComponent(directUrl) },
-      { label: 'allorigins', url: 'https://api.allorigins.win/raw?url=' + encodeURIComponent(directUrl) },
+  function classifyAdsbLolAircraft(a) {
+    const onGround = a.alt_baro === 'ground';
+    const altFt = (typeof a.alt_baro === 'number') ? a.alt_baro : null;
+    return {
+      icao24: (a.hex || '').toLowerCase(),
+      callsign: (a.flight || '').trim() || null,
+      country: a.r || a.t || '', // adsb.lol doesn't give origin country — show registration/type instead
+      lat: (typeof a.lat === 'number') ? a.lat : null,
+      lon: (typeof a.lon === 'number') ? a.lon : null,
+      baroAltM: altFt != null ? altFt / 3.28084 : null,
+      onGround: onGround,
+      velocityMs: (typeof a.gs === 'number') ? a.gs / 1.94384 : null,
+      trueTrack: (typeof a.track === 'number') ? a.track : null,
+      vrateMs: (typeof a.baro_rate === 'number') ? a.baro_rate / 196.85 : null,
+    };
+  }
+
+  // Each source returns a raw (unfiltered, undistanced) array of normalized
+  // aircraft objects, or throws. Tried in order; first success wins.
+  async function fetchViaAdsbLol(c) {
+    const url = 'https://api.adsb.lol/v2/point/' + c.lat + '/' + c.lon + '/' + RANGE_NM;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    return (data.ac || []).map(classifyAdsbLolAircraft);
+  }
+
+  async function fetchViaOpenSky(c, proxyPrefix) {
+    const box = bboxFor(c.lat, c.lon, RANGE_NM);
+    const direct = 'https://opensky-network.org/api/states/all?lamin=' + box.lamin +
+                   '&lomin=' + box.lomin + '&lamax=' + box.lamax + '&lomax=' + box.lomax;
+    const url = proxyPrefix ? proxyPrefix + encodeURIComponent(direct) : direct;
+    const res = await fetch(url);
+    if (res.status === 429) throw Object.assign(new Error('rate limited'), { status: 429 });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const text = await res.text();
+    const data = JSON.parse(text); // throws its own error on an HTML error page from a proxy
+    return (data.states || []).map(classifyOpenSkySample);
+  }
+
+  async function fetchNormalizedFlights(c) {
+    const sources = [
+      { label: 'adsb.lol', run: function () { return fetchViaAdsbLol(c); } },
+      { label: 'OpenSky direct', run: function () { return fetchViaOpenSky(c, null); } },
+      { label: 'OpenSky via corsproxy.io', run: function () { return fetchViaOpenSky(c, 'https://corsproxy.io/?url='); } },
+      { label: 'OpenSky via allorigins', run: function () { return fetchViaOpenSky(c, 'https://api.allorigins.win/raw?url='); } },
     ];
     const failures = [];
-    for (const attempt of attempts) {
+    for (const source of sources) {
       try {
-        const res = await fetch(attempt.url);
-        if (res.status === 429) {
-          throw Object.assign(new Error('rate limited'), { status: 429 });
-        }
-        if (!res.ok) {
-          failures.push(attempt.label + ': HTTP ' + res.status);
-          continue;
-        }
-        // A proxy can return 200 with an HTML error page instead of JSON —
-        // confirm this actually parses before trusting it.
-        const text = await res.text();
-        try {
-          const data = JSON.parse(text);
-          return data;
-        } catch (parseErr) {
-          failures.push(attempt.label + ': non-JSON response');
-          continue;
-        }
+        const raw = await source.run();
+        return { raw, sourceLabel: source.label };
       } catch (err) {
-        if (err && err.status === 429) throw err;
-        failures.push(attempt.label + ': ' + (err && err.message ? err.message : 'network error'));
+        if (err && err.status === 429) throw err; // don't keep burning through sources on a hard rate limit
+        failures.push(source.label + ': ' + (err && err.message ? err.message : 'network error'));
       }
     }
-    throw new Error('All routes failed — ' + failures.join(' | '));
+    throw new Error('All sources failed — ' + failures.join(' | '));
   }
 
   async function fetchFlights() {
     if (!center) return;
     setStatus('updating…', 'live');
-    const box = bboxFor(center.lat, center.lon, RANGE_NM);
-    const url = 'https://opensky-network.org/api/states/all?lamin=' + box.lamin +
-                '&lomin=' + box.lomin + '&lamax=' + box.lamax + '&lomax=' + box.lomax;
     try {
-      const data = await fetchJson(url);
-      const states = (data.states || []).map(classifySample).filter(function (f) {
+      const { raw, sourceLabel } = await fetchNormalizedFlights(center);
+      const states = raw.filter(function (f) {
         return !f.onGround && f.lat != null && f.lon != null;
       });
       states.forEach(function (f) {
@@ -554,7 +576,7 @@
       states.sort(function (a, b) { return a.distanceNm - b.distanceNm; });
       flights = states.filter(function (f) { return f.distanceNm <= RANGE_NM; });
       renderFlights();
-      setStatus('live · updated ' + new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}), 'live');
+      setStatus('live via ' + sourceLabel + ' · ' + new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}), 'live');
     } catch (err) {
       const isRateLimit = err && err.status === 429;
       const headline = isRateLimit
