@@ -280,19 +280,16 @@
 
   .error-state { color: var(--danger); }
 
-  .detail-card {
-    margin-top: 14px;
-    padding: 14px;
-    border: 1px solid var(--panel-line);
-    border-radius: 4px;
-    background: rgba(255,255,255,0.02);
+  .flight-expansion {
+    padding: 12px 10px 14px;
+    border-bottom: 1px solid var(--panel-line);
+    background: rgba(255, 179, 71, 0.04);
     font-family: 'JetBrains Mono', monospace;
     font-size: 0.85rem;
-    display: none;
   }
-  .detail-card.visible { display: block; }
-  .detail-card .row { display: flex; justify-content: space-between; padding: 3px 0; }
-  .detail-card .row span:first-child { color: var(--ink-dim); }
+  .flight-expansion .row { display: flex; justify-content: space-between; padding: 3px 0; }
+  .flight-expansion .row span:first-child { color: var(--ink-dim); }
+  .flight-expansion .detail-divider { border-top: 1px solid var(--panel-line); margin: 10px 0; }
 
   footer {
     font-size: 0.75rem;
@@ -332,6 +329,45 @@
     border-radius: 3px;
     cursor: pointer;
   }
+
+  .range-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.8rem;
+    color: var(--ink-dim);
+  }
+
+  .range-label-text {
+    color: var(--ink-dim);
+  }
+
+  .range-row button {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    border: 1px solid var(--panel-line);
+    background: var(--panel-bg);
+    color: var(--amber);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 1rem;
+    line-height: 1;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .range-row button:active {
+    background: rgba(255, 179, 71, 0.15);
+  }
+
+  #rangeValueText {
+    color: var(--ink);
+    min-width: 48px;
+    text-align: center;
+  }
 </style>
 </head>
 <body>
@@ -356,6 +392,13 @@
     <button id="applyLocBtn">Use this location</button>
   </div>
 
+  <div class="range-row">
+    <span class="range-label-text">Range</span>
+    <button id="rangeDownBtn" aria-label="Decrease range">−</button>
+    <span id="rangeValueText">40 nm</span>
+    <button id="rangeUpBtn" aria-label="Increase range">+</button>
+  </div>
+
   <main>
     <div class="scope-frame" id="scopeFrame">
       <div class="sweep"></div>
@@ -370,7 +413,6 @@
       <ul class="flight-list" id="flightList">
         <li class="empty-state">Waiting for a location fix…</li>
       </ul>
-      <div class="detail-card" id="detailCard"></div>
     </div>
   </main>
 
@@ -383,7 +425,10 @@
 
 <script>
 (function () {
-  const RANGE_NM = 40; // scope radius in nautical miles
+  let RANGE_NM = 40; // scope radius in nautical miles — adjustable via +/- controls
+  const RANGE_MIN = 10;
+  const RANGE_MAX = 150;
+  const RANGE_STEP = 10;
   const REFRESH_MS = 45000; // stay well under OpenSky's anonymous daily credit quota
   const STALE_MS = 90000;
   const OWN_PROXY = 'https://overheadproxy.mgambrell.workers.dev/?url=';
@@ -392,6 +437,7 @@
   let flights = [];
   let selectedIcao = null;
   let refreshTimer = null;
+  const aircraftInfoCache = new Map(); // icao24 -> { state: 'loading'|'ready'|'none'|'error', data?, message? }
 
   const svg = document.getElementById('scopeSvg');
   const flightList = document.getElementById('flightList');
@@ -401,7 +447,6 @@
   const locationLine = document.getElementById('locationLine');
   const editBtn = document.getElementById('editLocationBtn');
   const locForm = document.getElementById('locForm');
-  const detailCard = document.getElementById('detailCard');
 
   function toRad(d) { return d * Math.PI / 180; }
   function toDeg(r) { return r * 180 / Math.PI; }
@@ -468,6 +513,25 @@
     if (refreshTimer) clearInterval(refreshTimer);
     refreshTimer = setInterval(fetchFlights, REFRESH_MS);
   }
+
+  function applyRangeChange(newRange) {
+    RANGE_NM = Math.max(RANGE_MIN, Math.min(RANGE_MAX, newRange));
+    document.getElementById('rangeValueText').textContent = RANGE_NM + ' nm';
+    if (center) {
+      setLocationLabel('Within ' + RANGE_NM + ' nautical miles of ' + center.label);
+      drawScopeBase();
+      fetchFlights(); // re-fetch immediately against the new radius rather than waiting for the next tick
+    } else {
+      drawScopeBase();
+    }
+  }
+
+  document.getElementById('rangeDownBtn').addEventListener('click', function () {
+    applyRangeChange(RANGE_NM - RANGE_STEP);
+  });
+  document.getElementById('rangeUpBtn').addEventListener('click', function () {
+    applyRangeChange(RANGE_NM + RANGE_STEP);
+  });
 
   function drawScopeBase() {
     const rings = [0.33, 0.66, 1.0]; // fraction of RANGE_NM at r=180
@@ -543,6 +607,76 @@
     return (data.states || []).map(classifyOpenSkySample);
   }
 
+  // Owner + registration + flight route lookup, from adsbdb.com — a free,
+  // keyless community database. Returns the parsed "response" object, or
+  // null for a confirmed "not in the database" (their real 404 case).
+  async function fetchAdsbdbInfo(icao24, callsign) {
+    const path = '/v0/aircraft/' + icao24 + (callsign ? ('?callsign=' + encodeURIComponent(callsign)) : '');
+    const direct = 'https://api.adsbdb.com' + path;
+    try {
+      const res = await fetch(direct);
+      if (res.status === 404) return null;
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return (await res.json()).response;
+    } catch (directErr) {
+      const proxied = OWN_PROXY + encodeURIComponent(direct);
+      const res = await fetch(proxied);
+      if (res.status === 404) return null;
+      if (!res.ok) throw new Error('HTTP ' + res.status + ' (via proxy)');
+      return (await res.json()).response;
+    }
+  }
+
+  // Fire-and-cache: only ever looks a given aircraft up once per session.
+  // Re-renders the flight list in place once the lookup resolves — this
+  // updates both the row (registration/owner) and, if it's the expanded
+  // one, the inline detail dropdown.
+  function requestAircraftInfo(icao24, callsign) {
+    if (aircraftInfoCache.has(icao24)) return;
+    aircraftInfoCache.set(icao24, { state: 'loading' });
+    fetchAdsbdbInfo(icao24, callsign).then(function (resp) {
+      aircraftInfoCache.set(icao24, resp ? { state: 'ready', data: resp } : { state: 'none' });
+      if (flights.some(function (f) { return f.icao24 === icao24; })) renderFlights();
+    }).catch(function (err) {
+      aircraftInfoCache.set(icao24, { state: 'error', message: err && err.message });
+      if (flights.some(function (f) { return f.icao24 === icao24; })) renderFlights();
+    });
+  }
+
+  function renderAircraftInfoSection(icao24) {
+    const entry = aircraftInfoCache.get(icao24);
+    if (!entry || entry.state === 'loading') {
+      return '<div class="row" style="opacity:0.6;"><span>Owner &amp; route</span><span>looking up…</span></div>';
+    }
+    if (entry.state === 'error') {
+      return '<div class="row" style="opacity:0.6;"><span>Owner &amp; route</span><span>lookup failed</span></div>';
+    }
+    if (entry.state === 'none') {
+      return '<div class="row" style="opacity:0.6;"><span>Owner &amp; route</span><span>not in database</span></div>';
+    }
+    const ac = entry.data.aircraft;
+    const fr = entry.data.flightroute;
+    let html = '';
+    if (ac && ac.url_photo_thumbnail) {
+      html += '<img src="' + ac.url_photo_thumbnail + '" alt="" style="width:100%;border-radius:4px;margin-bottom:10px;display:block;" onerror="this.style.display=\'none\'">';
+    }
+    if (ac) {
+      html += '<div class="row"><span>Registration</span><span>' + (ac.registration || '—') + '</span></div>';
+      html += '<div class="row"><span>Type</span><span>' + (ac.type || ac.icao_type || '—') + '</span></div>';
+      html += '<div class="row"><span>Owner</span><span>' + (ac.registered_owner || '—') + '</span></div>';
+    }
+    if (fr) {
+      if (fr.airline && fr.airline.name) {
+        html += '<div class="row"><span>Airline</span><span>' + fr.airline.name + '</span></div>';
+      }
+      if (fr.origin && fr.destination) {
+        html += '<div class="row"><span>Route</span><span>' + fr.origin.iata_code + ' → ' + fr.destination.iata_code + '</span></div>';
+        html += '<div class="row" style="opacity:0.7; font-size:0.75em;"><span>' + fr.origin.municipality + '</span><span>' + fr.destination.municipality + '</span></div>';
+      }
+    }
+    return html || '<div class="row" style="opacity:0.6;"><span>Owner &amp; route</span><span>not in database</span></div>';
+  }
+
   async function fetchNormalizedFlights(c) {
     const sources = [
       { label: 'adsb.lol direct', run: function () { return fetchViaAdsbLol(c, null); } },
@@ -609,24 +743,40 @@
       drawBlips();
       return;
     }
+
+    // Enrich the nearest aircraft with owner/registration/type — capped so a
+    // busy sky doesn't fire off dozens of lookups against a free community
+    // API at once. Cached results also cover this for repeat renders.
+    flights.slice(0, 15).forEach(function (f) { requestAircraftInfo(f.icao24, f.callsign); });
+
     flightList.innerHTML = flights.map(function (f) {
       const v = vrateArrow(f.vrateMs);
-      const label = f.callsign || f.icao24.toUpperCase();
-      return '<li class="flight-row' + (f.icao24 === selectedIcao ? ' selected' : '') + '" data-icao="' + f.icao24 + '">' +
-        '<span class="callsign">' + label + '</span>' +
+      const info = aircraftInfoCache.get(f.icao24);
+      const ac = (info && info.state === 'ready') ? info.data.aircraft : null;
+      const primary = (ac && ac.registration) || f.callsign || f.icao24.toUpperCase();
+      const secondary = (ac && ac.registered_owner)
+        || ((ac && ac.registration && f.callsign) ? f.callsign : null)
+        || (ac && (ac.type || ac.icao_type))
+        || f.country || '';
+      const isSelected = f.icao24 === selectedIcao;
+      let rowHtml = '<li class="flight-row' + (isSelected ? ' selected' : '') + '" data-icao="' + f.icao24 + '">' +
+        '<span class="callsign">' + primary + '</span>' +
         '<span class="metric"><span class="val">' + fmtAlt(f.baroAltM) + '</span></span>' +
         '<span class="metric"><span class="val">' + fmtSpeed(f.velocityMs) + '</span></span>' +
         '<span class="metric ' + v.cls + '">' + v.symbol + '</span>' +
         '<span class="metric"><span class="val">' + f.distanceNm.toFixed(1) + ' nm</span></span>' +
-        '<span class="country">' + (f.country || '') + '</span>' +
+        '<span class="country">' + secondary + '</span>' +
         '</li>';
+      if (isSelected) {
+        rowHtml += '<li class="flight-expansion" data-icao="' + f.icao24 + '">' + expandedDetailHtml(f) + '</li>';
+      }
+      return rowHtml;
     }).join('');
 
     Array.prototype.forEach.call(flightList.querySelectorAll('.flight-row'), function (row) {
       row.addEventListener('click', function () {
         selectedIcao = (selectedIcao === row.dataset.icao) ? null : row.dataset.icao;
         renderFlights();
-        showDetail();
       });
     });
 
@@ -655,26 +805,22 @@
       g.addEventListener('click', function () {
         selectedIcao = (selectedIcao === g.dataset.icao) ? null : g.dataset.icao;
         renderFlights();
-        showDetail();
       });
     });
   }
 
-  function showDetail() {
-    if (!selectedIcao) { detailCard.classList.remove('visible'); return; }
-    const f = flights.find(function (x) { return x.icao24 === selectedIcao; });
-    if (!f) { detailCard.classList.remove('visible'); return; }
+  function expandedDetailHtml(f) {
     const v = vrateArrow(f.vrateMs);
-    detailCard.innerHTML =
-      '<div class="row"><span>Callsign</span><span>' + (f.callsign || '—') + '</span></div>' +
+    return '<div class="row"><span>Callsign</span><span>' + (f.callsign || '—') + '</span></div>' +
       '<div class="row"><span>ICAO24</span><span>' + f.icao24.toUpperCase() + '</span></div>' +
       '<div class="row"><span>Origin country</span><span>' + (f.country || '—') + '</span></div>' +
       '<div class="row"><span>Altitude</span><span>' + fmtAlt(f.baroAltM) + '</span></div>' +
       '<div class="row"><span>Ground speed</span><span>' + fmtSpeed(f.velocityMs) + '</span></div>' +
       '<div class="row"><span>Heading</span><span>' + (f.trueTrack != null ? Math.round(f.trueTrack) + '°' : '—') + '</span></div>' +
       '<div class="row"><span>Vertical rate</span><span class="' + v.cls + '">' + v.symbol + ' ' + (f.vrateMs != null ? Math.round(f.vrateMs * 196.85) + ' ft/min' : '—') + '</span></div>' +
-      '<div class="row"><span>Distance</span><span>' + f.distanceNm.toFixed(1) + ' nm</span></div>';
-    detailCard.classList.add('visible');
+      '<div class="row"><span>Distance</span><span>' + f.distanceNm.toFixed(1) + ' nm</span></div>' +
+      '<div class="detail-divider"></div>' +
+      renderAircraftInfoSection(f.icao24);
   }
 
   // ---------- Boot ----------
