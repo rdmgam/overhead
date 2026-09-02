@@ -585,8 +585,11 @@
 
   // Each source returns a raw (unfiltered, undistanced) array of normalized
   // aircraft objects, or throws. Tried in order; first success wins.
-  async function fetchViaAdsbLol(c, proxyPrefix) {
-    const direct = 'https://api.adsb.lol/v2/point/' + c.lat + '/' + c.lon + '/' + RANGE_NM;
+  // adsb.lol and airplanes.live are independently-run community networks
+  // that happen to share the same free, keyless, ADSBExchange-v2-compatible
+  // API shape — one function covers both.
+  async function fetchViaAdsbExchangeCompatible(host, c, proxyPrefix) {
+    const direct = 'https://' + host + '/v2/point/' + c.lat + '/' + c.lon + '/' + RANGE_NM;
     const url = proxyPrefix ? proxyPrefix + encodeURIComponent(direct) : direct;
     const res = await fetch(url);
     if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -679,8 +682,10 @@
 
   async function fetchNormalizedFlights(c) {
     const sources = [
-      { label: 'adsb.lol direct', run: function () { return fetchViaAdsbLol(c, null); } },
-      { label: 'adsb.lol via own proxy', run: function () { return fetchViaAdsbLol(c, OWN_PROXY); } },
+      { label: 'airplanes.live direct', run: function () { return fetchViaAdsbExchangeCompatible('api.airplanes.live', c, null); } },
+      { label: 'airplanes.live via own proxy', run: function () { return fetchViaAdsbExchangeCompatible('api.airplanes.live', c, OWN_PROXY); } },
+      { label: 'adsb.lol direct', run: function () { return fetchViaAdsbExchangeCompatible('api.adsb.lol', c, null); } },
+      { label: 'adsb.lol via own proxy', run: function () { return fetchViaAdsbExchangeCompatible('api.adsb.lol', c, OWN_PROXY); } },
       { label: 'OpenSky direct', run: function () { return fetchViaOpenSky(c, null); } },
       { label: 'OpenSky via own proxy', run: function () { return fetchViaOpenSky(c, OWN_PROXY); } },
     ];
