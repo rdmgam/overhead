@@ -556,8 +556,11 @@
         const raw = await source.run();
         return { raw, sourceLabel: source.label };
       } catch (err) {
-        if (err && err.status === 429) throw err; // don't keep burning through sources on a hard rate limit
-        failures.push(source.label + ': ' + (err && err.message ? err.message : 'network error'));
+        // A 429 only means *this* source is rate limited — it says nothing
+        // about the others, so keep going through the remaining sources
+        // rather than giving up entirely.
+        const reason = (err && err.status === 429) ? 'rate limited (429)' : (err && err.message ? err.message : 'network error');
+        failures.push(source.label + ': ' + reason);
       }
     }
     throw new Error('All sources failed — ' + failures.join(' | '));
@@ -580,14 +583,9 @@
       renderFlights();
       setStatus('live via ' + sourceLabel + ' · ' + new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}), 'live');
     } catch (err) {
-      const isRateLimit = err && err.status === 429;
-      const headline = isRateLimit
-        ? 'OpenSky\'s free daily request limit was hit — it resets tomorrow.'
-        : 'Could not reach flight data.';
-      const detail = (!isRateLimit && err && err.message) ? err.message : '';
-      setStatus(isRateLimit ? headline : 'connection issue', 'stale');
-      flightList.innerHTML = '<li class="error-state">' + headline + ' Retrying automatically.' +
-        (detail ? '<br><span style="opacity:0.7; font-size:0.75em;">' + detail + '</span>' : '') + '</li>';
+      setStatus('connection issue', 'stale');
+      flightList.innerHTML = '<li class="error-state">Could not reach flight data. Retrying automatically.' +
+        (err && err.message ? '<br><span style="opacity:0.7; font-size:0.75em;">' + err.message + '</span>' : '') + '</li>';
     }
   }
 
