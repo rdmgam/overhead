@@ -386,6 +386,7 @@
   const RANGE_NM = 40; // scope radius in nautical miles
   const REFRESH_MS = 45000; // stay well under OpenSky's anonymous daily credit quota
   const STALE_MS = 90000;
+  const OWN_PROXY = 'https://overheadproxy.mgambrell.workers.dev/?url=';
 
   let center = null; // {lat, lon, label}
   let flights = [];
@@ -520,8 +521,9 @@
 
   // Each source returns a raw (unfiltered, undistanced) array of normalized
   // aircraft objects, or throws. Tried in order; first success wins.
-  async function fetchViaAdsbLol(c) {
-    const url = 'https://api.adsb.lol/v2/point/' + c.lat + '/' + c.lon + '/' + RANGE_NM;
+  async function fetchViaAdsbLol(c, proxyPrefix) {
+    const direct = 'https://api.adsb.lol/v2/point/' + c.lat + '/' + c.lon + '/' + RANGE_NM;
+    const url = proxyPrefix ? proxyPrefix + encodeURIComponent(direct) : direct;
     const res = await fetch(url);
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
@@ -543,10 +545,10 @@
 
   async function fetchNormalizedFlights(c) {
     const sources = [
-      { label: 'adsb.lol', run: function () { return fetchViaAdsbLol(c); } },
+      { label: 'adsb.lol direct', run: function () { return fetchViaAdsbLol(c, null); } },
+      { label: 'adsb.lol via own proxy', run: function () { return fetchViaAdsbLol(c, OWN_PROXY); } },
       { label: 'OpenSky direct', run: function () { return fetchViaOpenSky(c, null); } },
-      { label: 'OpenSky via corsproxy.io', run: function () { return fetchViaOpenSky(c, 'https://corsproxy.io/?url='); } },
-      { label: 'OpenSky via allorigins', run: function () { return fetchViaOpenSky(c, 'https://api.allorigins.win/raw?url='); } },
+      { label: 'OpenSky via own proxy', run: function () { return fetchViaOpenSky(c, OWN_PROXY); } },
     ];
     const failures = [];
     for (const source of sources) {
